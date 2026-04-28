@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "safejudge"
+version = "1.0.0"
+description = "Multi-Model LLM-as-a-Judge for Automated AI Safety Evaluation"
+authors = ["Aaron Sweeney", "Juan Martin Zambrano Lozano"]
+readme = "README.md"
+packages = [{include = "safejudge"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+openai = "^1.0.0"
+evidently = ">=0.4.0"
+pandas = "^2.0"
+matplotlib = "^3.8"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+pytest-mock = "^3.12"
+
+[tool.poetry.scripts]
+safejudge = "safejudge.__main__:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

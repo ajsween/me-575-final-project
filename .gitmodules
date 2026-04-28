@@ -1,0 +1,3 @@
+[submodule "analyze-prompt-intent"]
+	path = analyze-prompt-intent
+	url = https://github.com/ajsween/analyze-prompt-intent.git
