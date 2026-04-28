@@ -64,6 +64,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=0,
         help="Run on a random sample of N test cases (0 = all)",
     )
+    parser.add_argument(
+        "--judge-url",
+        type=str,
+        default=None,
+        help="Override the LLM judge endpoint URL (e.g., Microsoft Foundry endpoint). Defaults to OLLAMA_URL.",
+    )
+    parser.add_argument(
+        "--judge-model",
+        type=str,
+        default=None,
+        help="Override the LLM judge model name (default: gpt-oss:latest)",
+    )
     return parser.parse_args(argv)
 
 
@@ -71,6 +83,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     modes = [m.strip() for m in args.modes.split(",")]
     run_id = generate_run_id()
+
+    # Apply judge endpoint/model overrides (e.g., for Microsoft Foundry)
+    if args.judge_url:
+        import safejudge.config as cfg
+        cfg.OLLAMA_URL = args.judge_url
+        import safejudge.judge as judge_mod
+        judge_mod.OLLAMA_URL = args.judge_url
+    if args.judge_model:
+        import safejudge.config as cfg
+        cfg.JUDGE_MODEL = args.judge_model
+        import safejudge.judge as judge_mod
+        judge_mod.JUDGE_MODEL = args.judge_model
 
     print("=" * 60)
     print("  SafeJudge Evaluation Pipeline")

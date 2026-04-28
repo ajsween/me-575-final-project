@@ -595,14 +595,16 @@ def generate_cross_mode_comparison(
                  fontsize=14, fontweight="bold")
 
     x = np.arange(len(dims))
-    width = 0.3
-    mode_colors = [_COLORS["blue"], _COLORS["warn"]]
+    n_modes = len(modes)
+    width = 0.7 / n_modes
+    mode_colors = [_COLORS["blue"], _COLORS["warn"], _COLORS["fail"], _COLORS["pass"]]
 
     for i, mode in enumerate(modes):
         mode_results = [r for r in results if r.mode == mode and r.succeeded]
         recalls = [compute_binary_metrics(mode_results, dim).recall for dim in dims]
-        offset = (i - 0.5) * width
-        bars = ax.bar(x + offset, recalls, width, label=mode, color=mode_colors[i],
+        offset = (i - (n_modes - 1) / 2) * width
+        bars = ax.bar(x + offset, recalls, width, label=mode,
+                      color=mode_colors[i % len(mode_colors)],
                       alpha=0.85, edgecolor="white", linewidth=1.5)
         for bar, val in zip(bars, recalls):
             ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02,

@@ -1,7 +1,6 @@
 # Project exclusions
 artifacts/
 references/
-evidence/
 
 # Evaluation run outputs (large, regeneratable)
 results/

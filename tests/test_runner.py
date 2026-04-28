@@ -98,7 +98,7 @@ class TestRunSingle:
         tc = _make_test_case()
         result = run_single(tc, "single")
         assert not result.succeeded
-        assert "JSON parse error" in result.error
+        assert "No JSON object found" in result.error
 
     @patch("safejudge.runner.subprocess.run")
     def test_sut_error(self, mock_run):

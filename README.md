@@ -8,6 +8,12 @@ SafeJudge is a structured evaluation and validation pipeline that systematically
 > George Mason University, Spring 2026  
 > Team: Aaron Sweeney, Juan Martin Zambrano Lozano
 
+| | |
+|---|---|
+| **Mode** | Implementation-Heavy |
+| **Commercial Tool** | Evidently AI (classification reports, drift detection) and/or Microsoft Foundry (cloud-hosted LLM inference) |
+| **Open-Source Tool** | Ollama (local LLM inference runtime for SUT + judge) |
+
 ## Architecture
 
 ```
@@ -135,6 +141,9 @@ python -m safejudge --modes single --skip-judge
 
 # Run on a sample subset
 python -m safejudge --modes single --sample 10
+
+# Use Microsoft Foundry as the judge backend
+python -m safejudge --judge-url https://<your-foundry-endpoint>/v1 --judge-model gpt-4o
 ```
 
 ### CLI Options
@@ -146,6 +155,8 @@ python -m safejudge --modes single --sample 10
 --skip-judge     Skip LLM-as-a-Judge scoring
 --sut-dir        Path to analyze-prompt-intent (default: analyze-prompt-intent/)
 --sample N       Run on random sample of N cases (0 = all)
+--judge-url      Override judge endpoint (e.g., Microsoft Foundry URL)
+--judge-model    Override judge model name (default: gpt-oss:latest)
 ```
 
 ### Evaluation Modes
@@ -234,6 +245,85 @@ After a full pipeline run, `evidence/` contains all artifacts linked by a unique
 | obfuscation | 15 | Base64, ROT13, hex, leetspeak, Braille, Morse, homoglyphs |
 | multi_turn | 16 | Crescendo attacks, payload splitting, escalation |
 | adversarial_suffix | 6 | GCG-style, format manipulation, social engineering |
+
+## Tool Stack and Justification
+
+### Ollama — Open-Source LLM Inference (Required: Open-Source Tool)
+
+**Role:** Local inference runtime for both the System Under Test and the LLM-as-a-Judge evaluator.
+
+- **Why selected:** The entire `analyze-prompt-intent` system depends on local LLM inference through Ollama's OpenAI-compatible API. No data leaves the local machine, which is critical when evaluating sensitive/harmful test prompts. Ollama provides access to multiple commercially distributed models (gpt-oss, qwen3, gpt-oss-safeguard) through a single runtime.
+- **Capability:** Serves models at `http://localhost:11434/v1` with OpenAI-compatible chat completions API, JSON mode, and multi-model concurrency.
+- **Integration:** The SUT calls Ollama for all classification inference. The judge module calls Ollama independently to score classifier outputs. Both use the `openai` Python client pointed at the Ollama endpoint.
+- **Risk addressed:** Enables fully local evaluation of adversarial and harmful prompts without sending sensitive test data to external APIs.
+
+### Evidently AI — Classification Reports and Drift Detection (Required: Commercial Tool)
+
+**Role:** Automated classification performance reporting, confusion matrix visualization, and cross-mode drift analysis.
+
+- **Why selected:** Evidently provides pre-built metric computation for binary classification tasks (accuracy, precision, recall, F1, confusion matrices) and generates interactive HTML reports without requiring custom UI development. It supports drift detection to compare results across evaluation modes, which directly maps to our cross-model consistency gate. As discussed in the course (Session 10, April 7), Evidently started as an open-source project with 20+ built-in statistical tests and has evolved into a commercial platform with monitoring, dashboards, and team collaboration features.
+- **Capability:** `ClassificationPreset` generates per-dimension reports; reference vs. current dataset comparison enables drift detection between single and safety_classifier modes.
+- **Integration:** After each evaluation run, results are transformed into Evidently-compatible DataFrames and reports are generated as HTML artifacts in the evidence folder.
+- **Output produced:** `classification_jailbreak.html`, `classification_prompt_injection.html`, `classification_harmful_content.html`, `drift_<mode1>_vs_<mode2>.html`.
+- **Risk addressed:** Provides auditable, visual evidence of classifier performance that can be reviewed by non-technical stakeholders (compliance officers, product managers) without reading raw JSON.
+
+### Microsoft Foundry — Cloud LLM Inference (Optional: Alternative Commercial Tool)
+
+**Role:** Alternative cloud-hosted inference backend for the LLM-as-a-Judge evaluator, replacing local Ollama for the judge model.
+
+- **Why available:** For environments where local GPU resources are insufficient or where the evaluation must run in CI/CD, Microsoft Foundry provides hosted access to OpenAI-compatible models via API. SafeJudge supports this via the `--ollama-url` flag — any OpenAI-compatible endpoint can serve as the judge backend.
+- **Capability:** Hosted model inference with enterprise-grade availability, rate limiting, and audit logging.
+- **Integration:** Set `--ollama-url` to the Foundry endpoint URL. The judge module uses the standard `openai` client, so any OpenAI-compatible API works transparently.
+- **Risk addressed:** Removes dependency on local GPU hardware for the judge component; enables cloud-based evaluation pipelines.
+
+## Validation Approach
+
+SafeJudge validates at three levels — the classifier, the judge, and the pipeline itself.
+
+### Validating the Classifier (System Under Test)
+
+- **Automated test suite:** The full labeled dataset (105 cases) is run through the classifier and metrics are computed against ground-truth labels.
+- **Cross-mode comparison:** Evaluations run with different model configurations (single, ensemble, safety_classifier) and results are compared for consistency.
+- **Obfuscation stress test:** Prompts encoded in Base64, ROT13, hex, leetspeak, Braille, Morse, Caesar cipher, homoglyphs, and zero-width characters test deobfuscation resilience.
+- **Multi-turn evaluation:** Conversation trajectory analysis is tested against labeled crescendo attacks, payload splitting, and gradual escalation sequences.
+- **Boundary testing:** False-positive-prone prompts (academic chemistry, security education, creative writing, roleplay) test calibration at the safe/harmful boundary.
+
+### Validating the Judge (Testing the Tester)
+
+- **Judge consistency check:** The judge is run twice on a sample of results and self-agreement is measured (should be within ±1 score on overall_score).
+- **Adversarial judge test:** Intentionally incorrect classifier outputs are presented to verify the judge catches obvious errors rather than rubber-stamping.
+- **Manual review sample:** 15–20 evaluation results are flagged in `evaluation_summary.md` for human review to verify judge accuracy.
+
+### Validating the Pipeline
+
+- **Unit tests (48 tests):** Each component tested in isolation with mocked dependencies — dataset loader, runner subprocess handling, judge response parsing, metric computation, gate threshold logic.
+- **Integration test:** End-to-end run with a 3-prompt mini dataset verifying dataset → runner → metrics → reports → gates flow.
+- **Reproducibility:** Two consecutive runs compared for metric stability (expected within ±5% due to LLM non-determinism).
+
+```bash
+# Run unit tests (no Ollama required)
+poetry run pytest tests/ -k "not integration" -v
+
+# Run integration test (requires Ollama + SUT)
+poetry run pytest tests/test_integration.py -v
+```
+
+## What to Review
+
+For evaluators reviewing this project, the key artifacts are:
+
+| Priority | What | Where | Why |
+|----------|------|-------|-----|
+| 1 | **Evidence package** | `evidence/evidence_package.json` | Run ID, SHA-256 hashes, config — the audit chain anchor |
+| 2 | **Evaluation summary** | `evidence/evaluation_summary.md` | Go/No-Go recommendation memo with metrics, concerns, mitigations |
+| 3 | **Gate dashboard** | `evidence/gate_dashboard.png` | Visual pass/fail for all 6 release gates |
+| 4 | **Confusion matrices** | `evidence/confusion_matrices.png` | TP/FP/FN/TN breakdown per threat dimension |
+| 5 | **Evidently reports** | `evidence/classification_*.html` | Interactive HTML classification reports (open in browser) |
+| 6 | **Safety radar** | `evidence/safety_radar.png` | Metrics vs thresholds at a glance |
+| 7 | **Pipeline code** | `safejudge/` | 7 modules, ~1500 lines — runner, judge, metrics, reports, gates |
+| 8 | **Test suite** | `tests/` | 48 unit tests + 1 integration test |
+| 9 | **Labeled dataset** | `datasets/` | 105 test cases with ground-truth labels |
+| 10 | **Architecture diagram** | `architecture_diagram.png` | Full pipeline visualization |
 
 ## Project Structure
 
